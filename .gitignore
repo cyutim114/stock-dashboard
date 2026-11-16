@@ -1,0 +1,37 @@
+# ─── 環境與秘密 ───
+.env
+.env.*
+
+# ─── Python ───
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# ─── 資料庫 ───
+*.db
+*.sqlite3
+
+# ─── 日誌 ───
+logs/
+*.log
+stderr.log
+stdout.log
+
+# ─── 暫存/備份 ───
+scratch/
+*.bak
+*.tmp
+
+# ─── IDE ───
+.vscode/
+.idea/
+*.swp
+
+# ─── OS ───
+Thumbs.db
+.DS_Store
+
+# ─── IIS 部署設定（依需求可移除） ───
+# web.config
+

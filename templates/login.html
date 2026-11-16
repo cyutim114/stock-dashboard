@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登入 - 股FRIEND</title>
+    <!-- 引入 Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700;900&family=Noto+Serif+TC:wght@700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Noto Sans TC', sans-serif; }
+        .serif-title { font-family: 'Noto Serif TC', serif; }
+    </style>
+</head>
+<body class="bg-[#f8fafc] min-h-screen flex flex-col">
+
+    <!-- 頂部導覽列 -->
+    <nav class="bg-white border-b border-slate-100 h-20 flex-shrink-0">
+        <div class="max-w-7xl mx-auto w-full h-full px-6 flex items-center justify-between">
+            <a href="/" class="flex items-center transition hover:opacity-85">
+                <img src="/static/images/股FRIEND完成.png" alt="股FRIEND" class="h-8 lg:h-9 w-auto object-contain">
+            </a>
+            
+            <div class="flex items-center space-x-4">
+                <a href="/login" class="text-slate-700 font-medium hover:text-[#2b50aa] transition text-sm">登入</a>
+                <a href="/register" class="bg-[#2b50aa] hover:bg-blue-800 text-white px-5 py-2.5 rounded-full font-medium shadow-md shadow-blue-100 transition text-center text-sm">免費註冊</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主內容區 -->
+    <main class="flex-grow grid grid-cols-1 lg:grid-cols-12 items-center min-h-[calc(100vh-5rem)]">
+        <div class="hidden lg:block lg:col-span-4 h-full bg-[#f8fafc] border-r border-slate-100"></div>
+
+        <div class="col-span-1 lg:col-span-4 w-full max-w-md mx-auto px-6 py-12 bg-white h-full flex flex-col justify-center">
+            
+            <div class="text-center space-y-4 mb-8">
+                <div class="flex items-center justify-center transition hover:opacity-85">
+                    <img src="/static/images/股FRIEND完成.png" alt="股FRIEND" class="h-10 w-auto object-contain">
+                </div>
+                <h2 class="text-3xl font-bold text-slate-900 serif-title">歡迎回來</h2>
+                <p class="text-slate-500 text-sm">登入您的股FRIEND 帳號</p>
+            </div>
+
+            <!-- 顯示 Flask Flash 成功/失敗訊息 -->
+            {% with messages = get_flashed_messages(with_categories=true) %}
+              {% if messages %}
+                {% for category, message in messages %}
+                  <div class="p-4 mb-4 text-sm rounded-xl text-center bg-green-50 text-green-600 border border-green-100">
+                    {{ message }}
+                  </div>
+                {% endfor %}
+              {% endif %}
+            {% endwith %}
+
+            <form action="/login" method="POST" class="space-y-6">
+                <div class="space-y-2">
+                    <label class="text-sm font-semibold text-slate-800 block text-left">帳號</label>
+                    <input type="text" name="name" required placeholder="請輸入您的帳號" 
+                           class="w-full px-4 py-3.5 rounded-xl border border-slate-200 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-[#2b50aa] focus:border-[#2b50aa] transition text-sm">
+                </div>
+
+                <div class="space-y-2">
+                    <label class="text-sm font-semibold text-slate-800 block text-left">密碼</label>
+                    <div class="relative">
+                        <input id="login-password" name="password" type="password" required placeholder="· · · · · · · ·" 
+                               class="w-full pl-4 pr-12 py-3.5 rounded-xl border border-slate-200 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-[#2b50aa] focus:border-[#2b50aa] transition text-sm tracking-widest">
+                        <button type="button" onclick="togglePassword('login-password')" class="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 bg-transparent border-0 p-0 outline-none">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-5 h-5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
+                <button type="submit" class="w-full bg-[#2b50aa] hover:bg-blue-800 text-white py-3.5 rounded-full font-bold text-sm tracking-wider shadow-md shadow-blue-100 transition duration-200">
+                    登入
+                </button>
+            </form>
+
+            <div class="text-center mt-8">
+                <p class="text-sm text-slate-500">
+                    還沒有帳號？ <a href="/register" class="font-semibold text-[#2b50aa] hover:underline">免費註冊</a>
+                </p>
+            </div>
+        </div>
+
+        <div class="hidden lg:block lg:col-span-4 h-full bg-[#f8fafc] border-l border-slate-100"></div>
+    </main>
+
+    <script>
+        function togglePassword(id) {
+            const el = document.getElementById(id);
+            el.type = el.type === 'password' ? 'text' : 'password';
+        }
+    </script>
+</body>
+</html>
