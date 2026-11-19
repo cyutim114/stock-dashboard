@@ -1,0 +1,15 @@
+# 既然就在資料夾內，path 這樣寫最安全
+path: C:/Users/cyutim/yolov911/data
+
+train: train/images
+val: val/images
+
+nc: 3
+names: ['head_shoulders', 'double_bottom', 'flag']
+
+
+
+
+
+
+

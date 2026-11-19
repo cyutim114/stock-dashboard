@@ -1849,7 +1849,9 @@ def api_assistant_chat():
 # ==========================================
 # YOLOv9 Pattern Detection Configuration
 # ==========================================
-YOLOV9_ROOT = Path(__file__).resolve().parent.parent / "yolov9_mcp"
+YOLOV9_ROOT = Path(__file__).resolve().parent / "yolov9_mcp"
+if not YOLOV9_ROOT.exists():
+    YOLOV9_ROOT = Path(__file__).resolve().parent.parent / "yolov9_mcp"
 YOLOV9_DIR = YOLOV9_ROOT / "yolov911"
 MODEL_PATH = YOLOV9_ROOT / "best9.pt"
 
@@ -2042,8 +2044,8 @@ def run_yolov9_direct_fallback(temp_img_path: str, conf_threshold: float = 0.60)
             "-c",
             f"""
 import sys
-sys.path.insert(0, r'C:\\Users\\cyutim\\claude code\\yolov9_mcp\\yolov911')
-sys.path.insert(0, r'C:\\Users\\cyutim\\claude code\\yolov9_mcp')
+sys.path.insert(0, r'{YOLOV9_DIR}')
+sys.path.insert(0, r'{YOLOV9_ROOT}')
 from server import detect_objects
 print(detect_objects(r'{temp_img_path}', conf_threshold={conf_threshold}))
 """

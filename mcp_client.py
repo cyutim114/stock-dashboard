@@ -58,7 +58,8 @@ class MultiMCPClient:
             else:
                 self.yolov9_args = self._split_args(yolov9_args_env)
         else:
-            default_server = r"C:\Users\cyutim\claude code\yolov9_mcp\server.py"
+            local_server = Path(__file__).resolve().parent / "yolov9_mcp" / "server.py"
+            default_server = str(local_server) if local_server.exists() else r"C:\Users\cyutim\claude code\yolov9_mcp\server.py"
             self.yolov9_args = [default_server]
 
         # Fugle API 定義

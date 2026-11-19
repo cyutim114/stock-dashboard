@@ -35,3 +35,7 @@ Thumbs.db
 # ─── IIS 部署設定（依需求可移除） ───
 # web.config
 
+
+# YOLO runs
+runs/
+
