@@ -2961,8 +2961,7 @@
                         style="aspect-ratio: 16 / 9;">
                         <!-- YouTube 播放器 (100% 滿版無裁切完整呈現) -->
                         <div class="w-full h-full overflow-hidden flex items-center justify-center">
-                            <iframe id="intro-yt-iframe" class="w-full h-full pointer-events-none"
-                                style="border: 0;"
+                            <iframe id="intro-yt-iframe" class="w-full h-full pointer-events-none" style="border: 0;"
                                 src="https://www.youtube.com/embed/jHxsbVLkLHc?enablejsapi=1&autoplay=1&mute=1&controls=0&rel=0&modestbranding=1&playsinline=1&iv_load_policy=3&disablekb=1&fs=0&loop=1&playlist=jHxsbVLkLHc"
                                 title="網頁功能導覽" frameborder="0"
                                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -3479,69 +3478,20 @@
                     <p class="text-slate-400">來自朝陽科技大學資訊管理學系，由王佳文教授指導，組成一個專注於研究 MCP 、圖形偵測技術與智慧股票資訊的團隊。</p>
                 </div>
 
-                <!-- 指導老師專屬卡片 (獨立置頂橫跨) -->
-                <div class="bg-slate-50 p-6 md:p-8 rounded-2xl border border-slate-100 hover:shadow-md transition">
-                    <div class="flex items-center space-x-4 mb-5">
-                        <div
-                            class="w-16 h-16 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-2xl font-bold border border-blue-200 shrink-0">
-                            王</div>
-                        <div>
-                            <div class="flex items-center gap-2">
-                                <h4 class="font-bold text-slate-800 text-xl m-0">王佳文</h4>
-                                <span
-                                    class="bg-blue-50 text-blue-600 border border-blue-200 text-xs px-2.5 py-0.5 rounded-full font-medium">指導教授</span>
-                            </div>
-                            <p class="text-slate-400 text-xs mt-1 mb-0">Wang Jia Wen · 指導老師</p>
-                        </div>
-                    </div>
-
-                    <!-- 老師詳細資歷 (3欄響應式佈局) -->
-                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 pt-5 border-t border-slate-200/80">
-                        <!-- 學歷 -->
-                        <div>
-                            <h5 class="text-sm font-bold text-slate-800 flex items-center gap-2 mb-3">
-                                <span class="w-2 h-2 rounded-full bg-blue-600 inline-block"></span>學歷
-                            </h5>
-                            <div class="space-y-2 text-sm text-slate-600">
-                                <div>
-                                    <p class="font-medium text-slate-700 m-0">國立雲林科技大學 管理研究所 博士</p>
-                                    <p class="text-xs text-slate-400 m-0">2003/09 ~ 2007/02</p>
+                <!-- 指導老師專屬卡片 (寬度與學生卡片一致) -->
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div class="bg-slate-50 p-6 rounded-2xl border border-slate-100 hover:shadow-md transition">
+                        <div class="flex items-center space-x-4">
+                            <div
+                                class="w-16 h-16 bg-blue-100 text-blue-700 rounded-full flex items-center justify-center text-2xl font-bold border border-blue-200 shrink-0">
+                                王</div>
+                            <div>
+                                <div class="flex items-center gap-2">
+                                    <h4 class="font-bold text-slate-800 text-lg m-0">王佳文</h4>
+                                    <span
+                                        class="bg-blue-50 text-blue-600 border border-blue-200 text-xs px-2.5 py-0.5 rounded-full font-medium">指導教授</span>
                                 </div>
-                                <div>
-                                    <p class="font-medium text-slate-700 m-0">國立雲林科技大學 資訊管理研究所 碩士</p>
-                                    <p class="text-xs text-slate-400 m-0">2001/09 ~ 2003/06</p>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- 專長與研究興趣 -->
-                        <div>
-                            <h5 class="text-sm font-bold text-slate-800 flex items-center gap-2 mb-3">
-                                <span class="w-2 h-2 rounded-full bg-blue-600 inline-block"></span>專長與研究興趣
-                            </h5>
-                            <p class="text-sm text-slate-600 leading-relaxed m-0">
-                                多準則決策、決策管理、資料探勘與數據分析、資訊管理及其應用
-                            </p>
-                        </div>
-
-                        <!-- 經歷 -->
-                        <div>
-                            <h5 class="text-sm font-bold text-slate-800 flex items-center gap-2 mb-3">
-                                <span class="w-2 h-2 rounded-full bg-blue-600 inline-block"></span>經歷
-                            </h5>
-                            <div class="space-y-2 text-sm text-slate-600">
-                                <div>
-                                    <p class="font-medium text-slate-700 m-0">南華大學資訊管理學系 副教授</p>
-                                    <p class="text-xs text-slate-400 m-0">2019/08 ~ 2023/07</p>
-                                </div>
-                                <div>
-                                    <p class="font-medium text-slate-700 m-0">南華大學資訊管理學系 助理教授</p>
-                                    <p class="text-xs text-slate-400 m-0">2016/02 ~ 2019/07</p>
-                                </div>
-                                <div>
-                                    <p class="font-medium text-slate-700 m-0">南華大學電子商務管理學系 助理教授</p>
-                                    <p class="text-xs text-slate-400 m-0">2007/02 ~ 2017/07</p>
-                                </div>
+                                <p class="text-slate-400 text-xs mt-1 mb-0">Wang Jia Wen · 指導老師</p>
                             </div>
                         </div>
                     </div>
