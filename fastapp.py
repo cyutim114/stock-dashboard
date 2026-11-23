@@ -2568,11 +2568,78 @@ def api_pattern_analyze():
         return jsonify({"error": f"分析失敗：{type(e).__name__}: {e}"}), 500
 
 
-def fetch_domestic_news_for_stock(code, name=None):
+def fetch_cnyes_stock_news(code: str, name: str = None, limit: int = 10) -> list:
     """
-    使用 Google News RSS 抓取特定台股的國內中文財經新聞。
-    code: 股票代號 (如 2330)
-    name: 股票名稱 (可為空)
+    【現代逆向 JSON API】直接請求鉅亨網 (Anue Cnyes) 內部搜索 JSON 接口
+    回傳具備標題、新聞連結、發布時間、封面圖片與摘要的高品質結構化資料 (響應 < 0.1s)
+    """
+    import requests
+    import re
+    import html
+    from datetime import datetime
+
+    items = []
+    clean_code = str(code).replace('.TW', '').replace('.TWO', '').strip()
+    query = clean_code
+    if name:
+        clean_name = name.split('(')[0].strip()
+        if clean_name and clean_name != clean_code:
+            query = f"{clean_code} {clean_name}"
+
+    try:
+        url = f"https://api.cnyes.com/media/api/v1/search?q={query}&limit={limit}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "Accept": "application/json"
+        }
+        resp = requests.get(url, headers=headers, timeout=4)
+        if resp.status_code == 200:
+            raw_items = resp.json().get("items", {}).get("data", [])
+            for it in raw_items:
+                raw_title = it.get("title", "")
+                if not raw_title:
+                    continue
+                # 清除 HTML 搜尋高亮標記如 <mark>
+                title = re.sub(r'<[^>]+>', '', raw_title).strip()
+                title = html.unescape(title)
+
+                nid = it.get("newsId")
+                link = f"https://news.cnyes.com/news/id/{nid}" if nid else "#"
+
+                pub_ts = it.get("publishAt", 0)
+                pub_time_str = datetime.fromtimestamp(pub_ts).strftime('%m/%d %H:%M') if pub_ts else ""
+
+                # 封面縮圖
+                cover_img = ""
+                c_src = it.get("coverSrc")
+                if isinstance(c_src, dict):
+                    cover_img = c_src.get("m", {}).get("src") or c_src.get("s", {}).get("src") or ""
+
+                # 新聞摘要
+                summary = it.get("summary") or it.get("content") or ""
+                summary = re.sub(r'<[^>]+>', '', html.unescape(summary))[:120].strip()
+
+                items.append({
+                    'code': clean_code,
+                    'name': name or clean_code,
+                    'title': title,
+                    'link': link,
+                    'publisher': '鉅亨網',
+                    'time': pub_time_str,
+                    'sort_ts': pub_ts,
+                    'tag': f"{clean_code} {name or ''}".strip(),
+                    'content': summary,
+                    'cover_img': cover_img
+                })
+    except Exception as e:
+        print(f"[cnyes_stock_news] 抓取 {clean_code} 逆向 API 失敗: {e}")
+
+    return items
+
+
+def fetch_domestic_news_for_stock_rss(code, name=None):
+    """
+    【傳統 RSS 備援管道】使用 Google News RSS 抓取個股新聞（當現代 API 遇網路阻礙時自動降級）
     """
     import urllib.parse
     import xml.etree.ElementTree as ET
@@ -2580,48 +2647,30 @@ def fetch_domestic_news_for_stock(code, name=None):
     from datetime import datetime
 
     items = []
-    
-    # 1. 取得股票名稱
-    if not name:
-        try:
-            from db_service import get_stock_name
-            name = get_stock_name(code) or ""
-        except Exception:
-            name = ""
-
-    # 去除股票名稱中可能影響搜尋的特殊字元 (例如 "(TW)")
     clean_name = name.split('(')[0].strip() if name else ""
-    
-    # 用代碼 + 名稱搜尋，或只用代碼/名稱
-    if clean_name:
-        query = f"{code} {clean_name}"
-    else:
-        query = code
+    query = f"{code} {clean_name}" if clean_name else code
 
     try:
         encoded_query = urllib.parse.quote(query)
         url = f"https://news.google.com/rss/search?q={encoded_query}&hl=zh-TW&gl=TW&ceid=TW:zh-Hant"
-        
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
         resp = requests.get(url, headers=headers, timeout=5)
         if resp.status_code == 200:
             root = ET.fromstring(resp.content)
-            for item in root.findall('.//item')[:10]: # 最多取 10 條
+            for item in root.findall('.//item')[:10]:
                 title_full = item.find('title').text or ""
                 link = item.find('link').text or "#"
                 pub_date = item.find('pubDate').text or ""
-                
-                # 嘗試解析媒體名稱，格式通常是： "標題 - 媒體"
+
                 publisher = "國內媒體"
                 title = title_full
                 if " - " in title_full:
                     parts = title_full.rsplit(" - ", 1)
                     title = parts[0]
                     publisher = parts[1]
-                
-                # 嘗試解析發布時間
+
                 sort_ts = 0
                 pub_time_str = pub_date
                 try:
@@ -2643,11 +2692,36 @@ def fetch_domestic_news_for_stock(code, name=None):
                     'time': pub_time_str,
                     'sort_ts': sort_ts,
                     'tag': f"{code} {name or ''}".strip(),
+                    'content': '',
+                    'cover_img': ''
                 })
     except Exception as e:
-        print(f"[domestic_news] 抓取 {code} 新聞失敗: {e}")
-        
+        print(f"[domestic_news_rss] 備援抓取 {code} 失敗: {e}")
+
     return items
+
+
+def fetch_domestic_news_for_stock(code, name=None):
+    """
+    【現代化新聞入口】
+    第一優先：採用鉅亨網現代逆向 JSON API（精準、高速、帶封面圖與摘要）
+    自動降級：若無數據或暫時超時，自動切換至 Google News RSS 傳統備援
+    """
+    clean_code = str(code).replace('.TW', '').replace('.TWO', '').strip()
+    if not name:
+        try:
+            from db_service import get_stock_name
+            name = get_stock_name(clean_code) or ""
+        except Exception:
+            name = ""
+
+    # 1. 現代逆向 JSON API
+    cnyes_items = fetch_cnyes_stock_news(clean_code, name=name, limit=10)
+    if cnyes_items:
+        return cnyes_items
+
+    # 2. 自動容錯降級回 RSS
+    return fetch_domestic_news_for_stock_rss(clean_code, name=name)
 
 
 def normalize_ticker(symbol: str) -> str:
@@ -2797,146 +2871,178 @@ def api_search_news():
         return jsonify({"success": False, "error": str(e), "traceback": traceback.format_exc()}), 500
 
 
+def fetch_cnyes_market_news() -> list:
+    """
+    【現代逆向 JSON API】並行請求鉅亨網 (Anue Cnyes) 頭條與台股即時 API
+    直接獲取純 JSON 格式的即時新聞、高解析度封面縮圖與內文摘要 (響應 < 0.2s)
+    """
+    import requests
+    import re
+    import html
+    import time
+    from datetime import datetime
+    import concurrent.futures
+
+    endpoints = [
+        {"url": "https://api.cnyes.com/media/api/v1/newslist/category/tw_stock?limit=30", "source": "鉅亨網"},
+        {"url": "https://api.cnyes.com/media/api/v1/newslist/category/headline?limit=30", "source": "鉅亨頭條"}
+    ]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/json"
+    }
+
+    all_items = []
+    seen_titles = set()
+
+    def _fetch_endpoint(ep):
+        res = []
+        try:
+            r = requests.get(ep["url"], headers=headers, timeout=4)
+            if r.status_code == 200:
+                raw_data = r.json()
+                for it in raw_data.get("items", {}).get("data", []):
+                    title = it.get("title", "").strip()
+                    if not title:
+                        continue
+                    title = re.sub(r'<[^>]+>', '', title)
+                    title = html.unescape(title)
+                    nid = it.get("newsId")
+                    link = f"https://news.cnyes.com/news/id/{nid}" if nid else "#"
+                    pub_ts = it.get("publishAt", int(time.time()))
+
+                    c_src = it.get("coverSrc")
+                    img = ""
+                    if isinstance(c_src, dict):
+                        img = c_src.get("m", {}).get("src") or c_src.get("s", {}).get("src") or ""
+
+                    summary = it.get("summary") or it.get("content") or ""
+                    summary = re.sub(r'<[^>]+>', '', html.unescape(summary))[:130].strip()
+
+                    res.append({
+                        "title": title,
+                        "link": link,
+                        "pub_ts": pub_ts,
+                        "content": summary,
+                        "source": ep["source"],
+                        "cover_img": img
+                    })
+        except Exception as e:
+            print(f"[cnyes_market_news] 請求 {ep['url']} 失敗: {e}")
+        return res
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(_fetch_endpoint, ep) for ep in endpoints]
+        for fut in concurrent.futures.as_completed(futures):
+            for item in fut.result():
+                norm_t = item['title'].lower().replace(" ", "")
+                if norm_t not in seen_titles:
+                    seen_titles.add(norm_t)
+                    all_items.append(item)
+
+    all_items.sort(key=lambda x: x['pub_ts'], reverse=True)
+    return all_items
+
+
+def fetch_rss_market_news_fallback() -> list:
+    """
+    【傳統 RSS 備援】自由時報與經濟日報 RSS 備用管線
+    """
+    import xml.etree.ElementTree as ET
+    import html
+    import requests
+    import re
+    import time
+    from datetime import datetime
+    import concurrent.futures
+
+    feeds = [
+        {"url": "https://news.ltn.com.tw/rss/business.xml", "source": "自由時報財經"},
+        {"url": "https://money.udn.com/rssfeed/news/1001/5590?ch=money", "source": "經濟日報股市"}
+    ]
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
+    def parse_pub_date(pub_date_str):
+        pub_date_str = pub_date_str.strip()
+        try:
+            clean_str = pub_date_str.split("+")[0].split("-")[0].strip()
+            dt = datetime.strptime(clean_str, "%a, %d %b %Y %H:%M:%S")
+            return int(dt.timestamp())
+        except Exception:
+            pass
+        return int(time.time())
+
+    def fetch_feed(feed):
+        items_list = []
+        try:
+            resp = requests.get(feed["url"], headers=headers, timeout=5)
+            if resp.status_code == 200:
+                root = ET.fromstring(resp.content)
+                for item in root.findall(".//item"):
+                    title = item.find("title").text if item.find("title") is not None else ""
+                    link = item.find("link").text if item.find("link") is not None else "#"
+                    pub_date_str = item.find("pubDate").text if item.find("pubDate") is not None else ""
+                    description = item.find("description").text if item.find("description") is not None else ""
+                    if not title:
+                        continue
+                    clean_desc = re.sub('<[^<]+?>', '', description)
+                    items_list.append({
+                        "title": html.unescape(title).strip(),
+                        "link": link,
+                        "pub_ts": parse_pub_date(pub_date_str),
+                        "content": html.unescape(clean_desc).strip(),
+                        "source": feed["source"],
+                        "cover_img": ""
+                    })
+        except Exception:
+            pass
+        return items_list
+
+    all_raw_news = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(fetch_feed, f) for f in feeds]
+        for fut in concurrent.futures.as_completed(futures):
+            all_raw_news.extend(fut.result())
+
+    seen = set()
+    dedup = []
+    for it in all_raw_news:
+        nt = it['title'].lower().replace(" ", "")
+        if nt not in seen:
+            seen.add(nt)
+            dedup.append(it)
+    dedup.sort(key=lambda x: x['pub_ts'], reverse=True)
+    return dedup
+
+
 @app.route('/api/news/market')
 def api_market_news():
     try:
-        import xml.etree.ElementTree as ET
-        import html
         from datetime import datetime
-        import requests
-        import concurrent.futures
 
-        feeds = [
-            {"url": "https://news.ltn.com.tw/rss/business.xml", "source": "自由時報財經"},
-            {"url": "https://money.udn.com/rssfeed/news/1001/5590?ch=money", "source": "經濟日報股市"}
-        ]
+        # 1. 優先採用現代逆向 JSON API (鉅亨網 Anue)
+        cnyes_news = fetch_cnyes_market_news()
 
-        etf_keywords = ["etf", "0050", "0056", "00878", "00919", "00929", "00940", "00896", "00400", "高股息", "配息", "除息", "成分股", "受益人", "受益憑證"]
+        # 2. 自動容錯降級：若現代 API 暫時無回應，切換傳統 RSS
+        if not cnyes_news:
+            cnyes_news = fetch_rss_market_news_fallback()
 
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        category_keywords = {
+            "ETF新聞": ["etf", "0050", "0056", "00878", "00919", "00929", "00940", "00896", "00400", "高股息", "配息", "除息", "成分股", "受益人", "受益憑證"],
+            "半導體": ["台積電", "台積", "聯發科", "晶圓", "ic設計", "封測", "晶片", "矽智財", "asml", "英特爾", "intel", "三星", "輝達", "晶圓代工", "艾司摩爾", "聯電", "日月光", "nv", "nvidia", "tsmc", "tsm", "力積電", "世界先進", "晶片法案", "世芯"],
+            "人工智慧": ["人工智慧", "ai", "輝達", "nvidia", "伺服器", "算力", "機器人", "散熱", "液冷", "機殼", "黃仁勳", "chatgpt", "llm", "openai", "超微", "amd", "微軟", "microsoft", "谷歌", "google", "奧特曼", "asic"],
+            "金融財經": ["金控", "銀行", "金融", "證券", "保險", "壽險", "降息", "升息", "聯準會", "fed", "央行", "國泰金", "富邦金", "中信金", "兆豐金", "玉山金", "第一金", "新光金", "台新金", "開發金", "永豐金", "合庫金", "華南金"],
+            "航運重電": ["航運", "貨櫃", "陽明", "長榮", "萬海", "綠能", "風電", "光電", "太陽能", "儲能", "重電", "華城", "士電", "中興電", "亞力", "東元", "紅海", "運價", "scfi", "塞港"],
+            "國際財經": ["國際", "美股", "美金", "美元", "美債", "美聯社", "歐元", "日圓", "日元", "中國", "陸股", "港股", "歐盟", "日股", "韓股", "通膨", "cpi", "日經", "納斯達克", "費半", "標普", "道瓊", "外資", "歐美", "日央", "歐洲", "美聯會"],
+            "生技醫療": ["生技", "醫療", "新藥", "臨床", "疫苗", "藥廠", "藥品", "健保", "癌症", "醫材", "生醫", "生技股", "藥華藥", "美時", "保瑞"]
         }
 
-        def parse_pub_date(pub_date_str):
-            pub_date_str = pub_date_str.strip()
-            # Try RSS standard format
-            try:
-                clean_str = pub_date_str
-                if "+" in clean_str:
-                    clean_str = clean_str.split("+")[0].strip()
-                elif "-" in clean_str:
-                    clean_str = clean_str.split("-")[0].strip()
-                dt = datetime.strptime(clean_str, "%a, %d %b %Y %H:%M:%S")
-                return int(dt.timestamp())
-            except:
-                pass
-
-            try:
-                dt = datetime.strptime(pub_date_str, "%Y-%m-%d %H:%M:%S")
-                return int(dt.timestamp())
-            except:
-                pass
-
-            try:
-                dt = datetime.fromisoformat(pub_date_str.replace('Z', '+00:00'))
-                return int(dt.timestamp())
-            except:
-                pass
-
-            return int(time.time())
-
-        def fetch_feed(feed):
-            items_list = []
-            try:
-                resp = requests.get(feed["url"], headers=headers, timeout=5)
-                if resp.status_code == 200:
-                    root = ET.fromstring(resp.content)
-                    items = root.findall(".//item")
-                    for item in items:
-                        title = item.find("title").text if item.find("title") is not None else ""
-                        link = item.find("link").text if item.find("link") is not None else "#"
-                        pub_date_str = item.find("pubDate").text if item.find("pubDate") is not None else ""
-                        description = item.find("description").text if item.find("description") is not None else ""
-
-                        if not title:
-                            continue
-
-                        title = html.unescape(title).strip()
-                        clean_desc = re.sub('<[^<]+?>', '', description)
-                        clean_desc = html.unescape(clean_desc).strip()
-
-                        pub_ts = parse_pub_date(pub_date_str)
-
-                        items_list.append({
-                            "title": title,
-                            "link": link,
-                            "pub_ts": pub_ts,
-                            "content": clean_desc,
-                            "source": feed["source"]
-                        })
-            except Exception as e:
-                print(f"[News Aggregator] Error fetching {feed['source']}: {e}")
-            return items_list
-
-        # Fetch in parallel
-        all_raw_news = []
-        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-            futures = [executor.submit(fetch_feed, f) for f in feeds]
-            for fut in concurrent.futures.as_completed(futures):
-                all_raw_news.extend(fut.result())
-
-        # Cross-feed deduplication by normalized title
-        seen_titles = set()
-        dedup_news = []
-        for item in all_raw_news:
-            norm_title = item['title'].lower().replace(" ", "")
-            if norm_title in seen_titles:
-                continue
-            seen_titles.add(norm_title)
-            dedup_news.append(item)
-
-        # Time filter: within last 7 days (604,800 seconds)
-        now = time.time()
-        seven_days_ago = now - (7 * 24 * 3600)
-        recent_news = [item for item in dedup_news if item['pub_ts'] >= seven_days_ago]
-
-        # Robust fallback in case feeds are temporarily unavailable or have network issues
-        if not recent_news:
-            recent_news = [
-                {
-                    "title": "台股大洗三溫暖！晶圓雙雄領軍，AI 供應鏈衝高回檔震盪",
-                    "link": "https://ec.ltn.com.tw/article/breakingnews/5457425",
-                    "pub_ts": int(time.time() - 3600),
-                    "content": "美股大漲帶動台股走勢，台積電、聯發科早盤強勢上攻，隨後賣壓出籠震盪近千點，記憶體及 AI PC 族群無懼狂飆，市場交投熱絡。",
-                    "source": "系統備援新聞"
-                },
-                {
-                    "title": "元大高股息 0056 最新配息出爐！年化配息率驚人吸引買盤卡位",
-                    "link": "https://money.udn.com/money/story/5607/9540130",
-                    "pub_ts": int(time.time() - 7200),
-                    "content": "中信及元大高股息 ETF 配息表現亮眼，寫下成立以來新高紀錄，受益人數與規模持續擴大，買盤卡位除息行情十分熱烈。",
-                    "source": "系統備援新聞"
-                }
-            ]
-
-        # Sort recent news by timestamp descending
-        recent_news.sort(key=lambda x: x['pub_ts'], reverse=True)
-
-        # Classify and map to target format
         news_list = []
-        for item in recent_news:
+        for item in cnyes_news:
             title_lower = item['title'].lower()
-            desc_lower = item['content'].lower()
-
-            category_keywords = {
-                "ETF新聞": ["etf", "0050", "0056", "00878", "00919", "00929", "00940", "00896", "00400", "高股息", "配息", "除息", "成分股", "受益人", "受益憑證"],
-                "半導體": ["台積電", "台積", "聯發科", "晶圓", "ic設計", "封測", "晶片", "矽智財", "asml", "英特爾", "intel", "三星", "輝達", "晶圓代工", "艾司摩爾", "聯電", "日月光", "nv", "nvidia", "tsmc", "tsm", "力積電", "世界先進", "晶片法案"],
-                "人工智慧": ["人工智慧", "ai", "輝達", "nvidia", "伺服器", "算力", "機器人", "散熱", "液冷", "機殼", "黃仁勳", "chatgpt", "llm", "openai", "超微", "amd", "微軟", "microsoft", "谷歌", "google", "奧特曼"],
-                "金融財經": ["金控", "銀行", "金融", "證券", "保險", "壽險", "降息", "升息", "聯準會", "fed", "央行", "國泰金", "富邦金", "中信金", "兆豐金", "玉山金", "第一金", "新光金", "台新金", "開發金", "永豐金", "合庫金", "華南金"],
-                "航運重電": ["航運", "貨櫃", "陽明", "長榮", "萬海", "綠能", "風電", "光電", "太陽能", "儲能", "重電", "華城", "士電", "中興電", "亞力", "東元", "紅海", "運價", "scfi", "塞港"],
-                "國際財經": ["國際", "美股", "美金", "美元", "美債", "美聯社", "歐元", "日圓", "日元", "中國", "陸股", "港股", "歐盟", "日股", "韓股", "通膨", "cpi", "日經", "納斯達克", "費半", "標普", "道瓊", "外資", "歐美", "日央", "歐洲", "美聯會"],
-                "生技醫療": ["生技", "醫療", "新藥", "臨床", "疫苗", "藥廠", "藥品", "健保", "癌症", "醫材", "生醫", "生技股", "藥華藥", "美時", "保瑞"]
-            }
+            desc_lower = (item.get('content') or '').lower()
 
             tag = "一般財經"
             for cat_name, keywords in category_keywords.items():
@@ -2949,21 +3055,23 @@ def api_market_news():
                 if matched:
                     break
 
-            time_str = datetime.fromtimestamp(item['pub_ts']).strftime('%m/%d %H:%M')
+            pub_ts = item.get('pub_ts', 0)
+            time_str = datetime.fromtimestamp(pub_ts).strftime('%m/%d %H:%M') if pub_ts else '剛剛'
 
             news_list.append({
                 "title": item['title'],
                 "link": item['link'],
                 "tag": tag,
                 "time": time_str,
-                "content": item['content'],
-                "source": item['source']
+                "content": item.get('content', ''),
+                "source": item.get('source', '鉅亨網'),
+                "cover_img": item.get('cover_img', '')
             })
 
         return jsonify({"success": True, "news": news_list})
     except Exception as e:
         traceback.print_exc()
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"success": False, "error": str(e), "news": []}), 500
 
 @app.route('/api/news/content')
 def api_news_content():
@@ -3038,7 +3146,14 @@ def api_news_content():
             unwanted.decompose()
 
         if not paragraphs:
-            if "ltn.com.tw" in url:
+            if "cnyes.com" in url:
+                article = soup.find("main") or soup.find("article") or soup
+                for p in article.find_all("p"):
+                    text = p.get_text().strip()
+                    if len(text) > 20 and not any(kw in text for kw in ["LINE ID", "Youtube", "按讚訂閱", "https://lin", "本公司所推薦", "未經授權", "翻印必究", "著作權", "莊佳螢分析師"]):
+                        if text not in paragraphs:
+                            paragraphs.append(text)
+            elif "ltn.com.tw" in url:
                 content_div = soup.find("div", class_="text")
                 if content_div:
                     for p in content_div.find_all("p", recursive=False):

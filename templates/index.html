@@ -11502,6 +11502,11 @@
                         </div>
                         <h3>${escapeHTML(title)}</h3>
                     </div>
+                    ${item.cover_img ? `
+                        <div class="news-cover-wrap shrink-0 overflow-hidden rounded-xl border border-slate-100 hidden sm:block" style="width: 104px; height: 68px;">
+                            <img src="${escapeHTML(item.cover_img)}" alt="" class="w-full h-full object-cover transition duration-300 hover:scale-105" loading="lazy" onerror="this.parentElement.style.display='none'">
+                        </div>
+                    ` : ''}
                 </a>`;
             });
             html += '</div>';
@@ -11687,6 +11692,11 @@
                         <h3>${escapeHTML(title)}</h3>
                         <p class="news-summary">${escapeHTML(summary)}</p>
                     </div>
+                    ${item.cover_img ? `
+                        <div class="news-cover-wrap shrink-0 overflow-hidden rounded-xl border border-slate-100 hidden sm:block" style="width: 116px; height: 76px;">
+                            <img src="${escapeHTML(item.cover_img)}" alt="" class="w-full h-full object-cover transition duration-300 hover:scale-105" loading="lazy" onerror="this.parentElement.style.display='none'">
+                        </div>
+                    ` : ''}
                 </a>`;
             });
             html += '</div>';
