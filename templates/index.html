@@ -11477,6 +11477,7 @@
                 return;
             }
 
+            window._newsDetailCache = window._newsDetailCache || {};
             let html = '<div>';
             filtered.forEach(item => {
                 const title = item.title || '無標題';
@@ -11486,6 +11487,10 @@
                 const code = item.code || '';
                 const name = item.name || code;
                 const stockLabel = (name && name !== code) ? `${code} ${name}` : code;
+
+                if (link && item.paragraphs && item.paragraphs.length > 0) {
+                    window._newsDetailCache[link] = { title, source: publisher, time, paragraphs: item.paragraphs };
+                }
 
                 html += `
                 <a href="${link}" onclick="openNewsDetail(event, this)"
@@ -11670,6 +11675,7 @@
                 '一般財經': { sentiment: 'neu', badge: '財經', icon: '📰' }
             };
 
+            window._newsDetailCache = window._newsDetailCache || {};
             let html = '<div>';
             filteredNews.forEach(item => {
                 const title = item.title || '無標題';
@@ -11678,6 +11684,11 @@
                 const time = item.time || '剛剛';
                 const summary = item.content || '無新聞摘要';
                 const source = item.source || '即時新聞';
+
+                // 寫入前端秒開快取
+                if (link && item.paragraphs && item.paragraphs.length > 0) {
+                    window._newsDetailCache[link] = { title, source, time, paragraphs: item.paragraphs };
+                }
 
                 const meta = tagMeta[tag] || { sentiment: 'neu', badge: '其他', icon: '🌐' };
 
@@ -11703,7 +11714,38 @@
             newsList.innerHTML = html;
         }
 
-        // 💡 開啟新聞全文頁面並非同步載入後端擷取的內文
+        // 💡 全域新聞內文快取 (0ms 秒開，杜絕任何網路逾時)
+        window._newsDetailCache = window._newsDetailCache || {};
+
+        function renderNewsDetailView(container, title, source, time, url, paragraphs, isFallback = false) {
+            let paragraphsHtml = '<div class="news-detail-paragraphs">';
+            paragraphs.forEach(p => {
+                paragraphsHtml += `<p>${escapeHTML(p)}</p>`;
+            });
+            paragraphsHtml += '</div>';
+
+            const fallbackNotice = isFallback ? `
+                <div class="alert alert-info py-2 px-3 mb-3" style="font-size:12px; border-radius:10px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); color: var(--primary);">
+                    <i class="fa-solid fa-circle-info mr-1"></i> 本文為重點精華摘要，如需閱讀完整報導，請點擊下方按鈕前往原始媒體。
+                </div>
+            ` : '';
+
+            container.innerHTML = `
+                <h2 class="news-detail-title">${escapeHTML(title)}</h2>
+                <div class="news-detail-meta">
+                    <span>📰 來源: ${escapeHTML(source)}</span>
+                    <span>🕒 時間: ${escapeHTML(time)}</span>
+                </div>
+                ${fallbackNotice}
+                ${paragraphsHtml}
+                <div style="margin-top:32px; padding-top:20px; border-top:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
+                    <span style="font-size:12px; color:var(--text-secondary);">新聞版權歸原媒體所有</span>
+                    <a href="${url}" target="_blank" class="btn btn-outline-primary btn-sm" style="font-size:12px; font-weight:700; border-radius:8px; padding:6px 14px; text-decoration:none;">開啟原始新聞連結 <i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                </div>
+            `;
+        }
+
+        // 💡 開啟新聞全文頁面（優先命中 0ms 前端快取，未命中時非同步向後端容錯請求）
         async function openNewsDetail(event, el) {
             if (event) event.preventDefault();
 
@@ -11718,7 +11760,13 @@
             // 轉到新聞詳細 SPA 視圖
             navigateTo('news-detail');
 
-            // 顯示載入狀態，帶上新聞標題與來源/時間
+            // 💡 1. 優先命中快取 (即時市場新聞或已載入新聞，0ms 瞬間完成渲染，杜絕等待與逾時)
+            if (window._newsDetailCache && window._newsDetailCache[url] && window._newsDetailCache[url].paragraphs?.length > 0) {
+                renderNewsDetailView(container, title, source, time, url, window._newsDetailCache[url].paragraphs);
+                return;
+            }
+
+            // 顯示載入狀態
             container.innerHTML = `
                 <h2 class="news-detail-title">${escapeHTML(title)}</h2>
                 <div class="news-detail-meta">
@@ -11736,24 +11784,8 @@
                 const data = await response.json();
 
                 if (data.success && data.paragraphs && data.paragraphs.length > 0) {
-                    let paragraphsHtml = '<div class="news-detail-paragraphs">';
-                    data.paragraphs.forEach(p => {
-                        paragraphsHtml += `<p>${escapeHTML(p)}</p>`;
-                    });
-                    paragraphsHtml += '</div>';
-
-                    container.innerHTML = `
-                        <h2 class="news-detail-title">${escapeHTML(title)}</h2>
-                        <div class="news-detail-meta">
-                            <span>📰 來源: ${escapeHTML(source)}</span>
-                            <span>🕒 時間: ${escapeHTML(time)}</span>
-                        </div>
-                        ${paragraphsHtml}
-                        <div style="margin-top:32px; padding-top:20px; border-top:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:16px;">
-                            <span style="font-size:12px; color:var(--text-secondary);">新聞版權歸原媒體所有</span>
-                            <a href="${url}" target="_blank" class="btn btn-outline-primary btn-sm" style="font-size:12px; font-weight:700; border-radius:8px; padding:6px 14px; text-decoration:none;">開啟原始新聞連結 <i class="fa-solid fa-arrow-up-right-from-square"></i></a>
-                        </div>
-                    `;
+                    window._newsDetailCache[url] = { title, source, time, paragraphs: data.paragraphs };
+                    renderNewsDetailView(container, title, source, time, url, data.paragraphs, !!data.fallback);
                 } else {
                     throw new Error(data.error || '無法分析該網頁的內文。');
                 }
@@ -11765,7 +11797,7 @@
                         <span>🕒 時間: ${escapeHTML(time)}</span>
                     </div>
                     <div class="alert alert-warning py-3 px-4" role="alert" style="font-size:13px; border-radius:12px;">
-                        <i class="fa-solid fa-triangle-exclamation"></i> 擷取全文失敗：${escapeHTML(e.message)}
+                        <i class="fa-solid fa-triangle-exclamation"></i> 擷取全文提示：${escapeHTML(e.message)}
                     </div>
                     <p class="text-muted" style="font-size:13px; margin-top:16px;">此外部新聞來源因防爬蟲保護或需登入驗證而無法直接內嵌全文，您可以點擊下方按鈕開啟原始網站閱讀完整文章。</p>
                     <div style="margin-top:32px; padding-top:20px; border-top:1px solid var(--glass-border); text-align:right;">

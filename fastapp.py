@@ -2568,6 +2568,10 @@ def api_pattern_analyze():
         return jsonify({"error": f"分析失敗：{type(e).__name__}: {e}"}), 500
 
 
+# 全域新聞全文快取：{news_id_or_url: [paragraphs]}，供新聞詳情秒級讀取（響應 0ms，杜絕網路逾時）
+CNYES_ARTICLE_CACHE = {}
+
+
 def fetch_cnyes_stock_news(code: str, name: str = None, limit: int = 10) -> list:
     """
     【現代逆向 JSON API】直接請求鉅亨網 (Anue Cnyes) 內部搜索 JSON 接口
@@ -2589,7 +2593,7 @@ def fetch_cnyes_stock_news(code: str, name: str = None, limit: int = 10) -> list
     try:
         url = f"https://api.cnyes.com/media/api/v1/search?q={query}&limit={limit}"
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept": "application/json"
         }
         resp = requests.get(url, headers=headers, timeout=4)
@@ -2617,7 +2621,12 @@ def fetch_cnyes_stock_news(code: str, name: str = None, limit: int = 10) -> list
 
                 # 新聞摘要
                 summary = it.get("summary") or it.get("content") or ""
-                summary = re.sub(r'<[^>]+>', '', html.unescape(summary))[:120].strip()
+                summary = re.sub(r'<[^>]+>', '', html.unescape(summary))[:160].strip()
+
+                # 如果快取已命中完整全文段落，直接關聯；若無則將摘要備用段落加入快取
+                item_paras = CNYES_ARTICLE_CACHE.get(str(nid), [])
+                if not item_paras and summary and len(summary) > 20:
+                    CNYES_ARTICLE_CACHE.setdefault(str(nid), [summary])
 
                 items.append({
                     'code': clean_code,
@@ -2629,7 +2638,8 @@ def fetch_cnyes_stock_news(code: str, name: str = None, limit: int = 10) -> list
                     'sort_ts': pub_ts,
                     'tag': f"{clean_code} {name or ''}".strip(),
                     'content': summary,
-                    'cover_img': cover_img
+                    'cover_img': cover_img,
+                    'paragraphs': item_paras
                 })
     except Exception as e:
         print(f"[cnyes_stock_news] 抓取 {clean_code} 逆向 API 失敗: {e}")
@@ -2874,21 +2884,22 @@ def api_search_news():
 def fetch_cnyes_market_news() -> list:
     """
     【現代逆向 JSON API】並行請求鉅亨網 (Anue Cnyes) 頭條與台股即時 API
-    直接獲取純 JSON 格式的即時新聞、高解析度封面縮圖與內文摘要 (響應 < 0.2s)
+    直接獲取純 JSON 格式的即時新聞、高解析度封面縮圖、完整文章段落與摘要 (響應 < 0.2s)
     """
     import requests
     import re
     import html
     import time
+    from bs4 import BeautifulSoup
     from datetime import datetime
     import concurrent.futures
 
     endpoints = [
-        {"url": "https://api.cnyes.com/media/api/v1/newslist/category/tw_stock?limit=30", "source": "鉅亨網"},
-        {"url": "https://api.cnyes.com/media/api/v1/newslist/category/headline?limit=30", "source": "鉅亨頭條"}
+        {"url": "https://api.cnyes.com/media/api/v1/newslist/category/tw_stock?limit=40", "source": "鉅亨網"},
+        {"url": "https://api.cnyes.com/media/api/v1/newslist/category/headline?limit=40", "source": "鉅亨頭條"}
     ]
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
         "Accept": "application/json"
     }
 
@@ -2898,7 +2909,7 @@ def fetch_cnyes_market_news() -> list:
     def _fetch_endpoint(ep):
         res = []
         try:
-            r = requests.get(ep["url"], headers=headers, timeout=4)
+            r = requests.get(ep["url"], headers=headers, timeout=5)
             if r.status_code == 200:
                 raw_data = r.json()
                 for it in raw_data.get("items", {}).get("data", []):
@@ -2916,7 +2927,28 @@ def fetch_cnyes_market_news() -> list:
                     if isinstance(c_src, dict):
                         img = c_src.get("m", {}).get("src") or c_src.get("s", {}).get("src") or ""
 
-                    summary = it.get("summary") or it.get("content") or ""
+                    # 解析完整 HTML 內文並快取（秒開全文）
+                    raw_content = it.get("content") or ""
+                    paragraphs = []
+                    if raw_content:
+                        try:
+                            c_soup = BeautifulSoup(html.unescape(raw_content), "html.parser")
+                            for p in c_soup.find_all(["p", "div"]):
+                                txt = p.get_text().strip()
+                                if len(txt) > 15 and not any(kw in txt for kw in ["LINE ID", "Youtube", "按讚訂閱", "https://lin", "本公司所推薦", "未經授權", "翻印必究", "著作權", "莊佳螢分析師"]):
+                                    if txt not in paragraphs:
+                                        paragraphs.append(txt)
+                        except Exception:
+                            pass
+
+                    # 寫入全域內文快取 (支援 newsId 與完整 link 雙重索引)
+                    if paragraphs:
+                        if nid:
+                            CNYES_ARTICLE_CACHE[str(nid)] = paragraphs
+                        if link and link != "#":
+                            CNYES_ARTICLE_CACHE[link] = paragraphs
+
+                    summary = it.get("summary") or (paragraphs[0] if paragraphs else "") or raw_content
                     summary = re.sub(r'<[^>]+>', '', html.unescape(summary))[:130].strip()
 
                     res.append({
@@ -2925,7 +2957,8 @@ def fetch_cnyes_market_news() -> list:
                         "pub_ts": pub_ts,
                         "content": summary,
                         "source": ep["source"],
-                        "cover_img": img
+                        "cover_img": img,
+                        "paragraphs": paragraphs
                     })
         except Exception as e:
             print(f"[cnyes_market_news] 請求 {ep['url']} 失敗: {e}")
@@ -2994,7 +3027,8 @@ def fetch_rss_market_news_fallback() -> list:
                         "pub_ts": parse_pub_date(pub_date_str),
                         "content": html.unescape(clean_desc).strip(),
                         "source": feed["source"],
-                        "cover_img": ""
+                        "cover_img": "",
+                        "paragraphs": []
                     })
         except Exception:
             pass
@@ -3065,7 +3099,8 @@ def api_market_news():
                 "time": time_str,
                 "content": item.get('content', ''),
                 "source": item.get('source', '鉅亨網'),
-                "cover_img": item.get('cover_img', '')
+                "cover_img": item.get('cover_img', ''),
+                "paragraphs": item.get('paragraphs', [])
             })
 
         return jsonify({"success": True, "news": news_list})
@@ -3080,7 +3115,23 @@ def api_news_content():
         return jsonify({"success": False, "error": "Missing url parameter"}), 400
         
     try:
-        # 如果是 Google News 的轉址連結，先進行解碼以取得真實新聞網址
+        import requests
+        from bs4 import BeautifulSoup
+        import html
+        import re
+        import time
+
+        # 1. 優先從記憶體快取秒取（若來自即時市場新聞或先前已解析的新聞，0ms 回應，絕不逾時）
+        match = re.search(r'/news/id/(\d+)', url)
+        news_id = match.group(1) if match else None
+
+        if news_id and str(news_id) in CNYES_ARTICLE_CACHE and len(CNYES_ARTICLE_CACHE[str(news_id)]) > 0:
+            return jsonify({"success": True, "paragraphs": CNYES_ARTICLE_CACHE[str(news_id)], "cached": True})
+
+        if url in CNYES_ARTICLE_CACHE and len(CNYES_ARTICLE_CACHE[url]) > 0:
+            return jsonify({"success": True, "paragraphs": CNYES_ARTICLE_CACHE[url], "cached": True})
+
+        # 2. 如果是 Google News 的轉址連結，先進行解碼以取得真實新聞網址
         if url and ("news.google.com" in url or "articles/" in url):
             try:
                 from googlenewsdecoder import gnewsdecoder
@@ -3094,111 +3145,170 @@ def api_news_content():
             except Exception as dec_err:
                 print(f"[api_news_content] Failed to decode Google News URL: {dec_err}")
 
-        import requests
-        from bs4 import BeautifulSoup
-        import html
-        import re
-        import time
-        
+        # 3. 若為鉅亨網新聞且未在快取中，使用專用 TLS 容錯連線直接取得頁面
+        if "cnyes.com" in url:
+            try:
+                import ssl
+                import urllib.request
+                ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                ctx.options |= getattr(ssl, "OP_LEGACY_SERVER_CONNECT", 0x4)
+                req = urllib.request.Request(
+                    url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0 Safari/537.36",
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Accept-Language": "zh-TW,zh;q=0.9",
+                        "Connection": "close"
+                    }
+                )
+                with urllib.request.urlopen(req, timeout=4, context=ctx) as r_cnyes:
+                    cnyes_html = r_cnyes.read()
+                    soup_cnyes = BeautifulSoup(cnyes_html, "html.parser")
+                    for u in soup_cnyes.find_all(['script', 'style', 'nav', 'header', 'footer', 'aside', 'iframe', 'form']):
+                        u.decompose()
+                    article_cnyes = soup_cnyes.find(id="article-container") or soup_cnyes.find("article") or soup_cnyes.find("main") or soup_cnyes
+                    cnyes_paras = []
+                    for p in article_cnyes.find_all("p"):
+                        txt = p.get_text().strip()
+                        if len(txt) > 20 and not any(kw in txt for kw in ["LINE ID", "Youtube", "按讚訂閱", "https://lin", "本公司所推薦", "未經授權", "翻印必究", "著作權", "莊佳螢分析師"]):
+                            if txt not in cnyes_paras:
+                                cnyes_paras.append(txt)
+                    if cnyes_paras:
+                        if news_id:
+                            CNYES_ARTICLE_CACHE[str(news_id)] = cnyes_paras
+                        CNYES_ARTICLE_CACHE[url] = cnyes_paras
+                        return jsonify({"success": True, "paragraphs": cnyes_paras})
+            except Exception as cnyes_err:
+                print(f"[api_news_content] 專用連線抓取 cnyes 失敗: {cnyes_err}")
+
+        # 4. 其他媒體或常規網站解析
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+            "Connection": "close"
         }
         
-        resp = requests.get(url, headers=headers, timeout=10)
-        if resp.status_code != 200:
-            return jsonify({"success": False, "error": f"Failed to fetch content, status: {resp.status_code}"})
-            
-        soup = BeautifulSoup(resp.content, "html.parser")
         paragraphs = []
-        
-        # 1. 優先從 JSON-LD 結構化資料中提取文章內文 (支援 CMoney, 鉅亨網, Yahoo 等現代 SPA/SSR 網站)
         try:
-            import json
-            for s in soup.find_all('script', type=re.compile(r'application/ld\+json', re.I)):
-                if not s.string:
-                    continue
+            resp = requests.get(url, headers=headers, timeout=6)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.content, "html.parser")
+
+                # (1) 優先從 JSON-LD 結構化資料中提取文章內文 (支援 CMoney, Yahoo 等現代 SPA/SSR 網站)
                 try:
-                    data = json.loads(s.string)
-                    items_to_check = data if isinstance(data, list) else [data]
-                    for item in items_to_check:
-                        if not isinstance(item, dict):
-                            continue
-                        # 檢查 articleBody, text, description 等欄位
-                        body = item.get('articleBody') or item.get('text')
-                        if body and isinstance(body, str) and len(body.strip()) > 30:
-                            for raw_p in body.splitlines():
-                                p_clean = raw_p.strip()
-                                if len(p_clean) > 10 and not any(kw in p_clean for kw in ["登入", "註冊", "下載APP", "版權所有"]):
-                                    paragraphs.append(p_clean)
-                            if paragraphs:
-                                break
-                    if paragraphs:
-                        break
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                    import json
+                    for s in soup.find_all('script', type=re.compile(r'application/ld\+json', re.I)):
+                        if not s.string: continue
+                        try:
+                            data = json.loads(s.string)
+                            items_to_check = data if isinstance(data, list) else [data]
+                            for item in items_to_check:
+                                if not isinstance(item, dict): continue
+                                body = item.get('articleBody') or item.get('text')
+                                if body and isinstance(body, str) and len(body.strip()) > 30:
+                                    for raw_p in body.splitlines():
+                                        p_clean = raw_p.strip()
+                                        if len(p_clean) > 10 and not any(kw in p_clean for kw in ["登入", "註冊", "下載APP", "版權所有"]):
+                                            paragraphs.append(p_clean)
+                                    if paragraphs: break
+                            if paragraphs: break
+                        except Exception: pass
+                except Exception: pass
 
-        # 移除不需要的元素
-        for unwanted in soup.find_all(['script', 'style', 'nav', 'header', 'footer', 'aside', 'iframe', 'form']):
-            unwanted.decompose()
+                # 移除雜項
+                for unwanted in soup.find_all(['script', 'style', 'nav', 'header', 'footer', 'aside', 'iframe', 'form']):
+                    unwanted.decompose()
 
-        if not paragraphs:
-            if "cnyes.com" in url:
-                article = soup.find("main") or soup.find("article") or soup
-                for p in article.find_all("p"):
-                    text = p.get_text().strip()
-                    if len(text) > 20 and not any(kw in text for kw in ["LINE ID", "Youtube", "按讚訂閱", "https://lin", "本公司所推薦", "未經授權", "翻印必究", "著作權", "莊佳螢分析師"]):
-                        if text not in paragraphs:
-                            paragraphs.append(text)
-            elif "ltn.com.tw" in url:
-                content_div = soup.find("div", class_="text")
-                if content_div:
-                    for p in content_div.find_all("p", recursive=False):
-                        text = p.get_text().strip()
-                        if text and not p.find("span", class_="ph_b") and "點我下載" not in text and "不定期送" not in text:
-                            paragraphs.append(text)
-            elif "udn.com" in url:
-                content_div = soup.find(id="article_body") or soup.find("section", id="article_body")
-                if content_div:
-                    for p in content_div.find_all("p"):
-                        text = p.get_text().strip()
-                        if text and not p.get("class") and "圖／" not in text and "記者" not in text[:5]:
-                            paragraphs.append(text)
-                        elif text and "記者" in text[:5] and len(text) > 20:
-                            paragraphs.append(text)
-            elif "cmoney.tw" in url:
-                content_div = soup.find("div", class_=re.compile(r"articleContent|article-content|content|articleBody", re.I)) or soup.find("article")
-                if content_div:
-                    for p in content_div.find_all(["p", "div"]):
-                        text = p.get_text().strip()
-                        if len(text) > 15 and not any(kw in text for kw in ["登入", "註冊", "股市爆料同學會", "下載APP", "立即追蹤"]):
-                            if text not in paragraphs:
-                                paragraphs.append(text)
-            elif "yahoo.com" in url:
-                content_div = soup.find("div", class_="caas-body") or soup.find("article")
-                if content_div:
-                    for p in content_div.find_all("p"):
-                        text = p.get_text().strip()
-                        if len(text) > 10 and not any(kw in text for kw in ["延伸閱讀", "看更多", "Yahoo奇摩股市"]):
-                            paragraphs.append(text)
+                if not paragraphs:
+                    if "cnyes.com" in url:
+                        article = soup.find(id="article-container") or soup.find("article") or soup.find("main") or soup
+                        for p in article.find_all("p"):
+                            text = p.get_text().strip()
+                            if len(text) > 20 and not any(kw in text for kw in ["LINE ID", "Youtube", "按讚訂閱", "https://lin", "本公司所推薦", "未經授權", "翻印必究", "著作權", "莊佳螢分析師"]):
+                                if text not in paragraphs:
+                                    paragraphs.append(text)
+                    elif "ltn.com.tw" in url:
+                        content_div = soup.find("div", class_="text") or soup.find("div", class_="whitecon")
+                        if content_div:
+                            for p in content_div.find_all("p", recursive=False):
+                                text = p.get_text().strip()
+                                if text and not p.find("span", class_="ph_b") and "點我下載" not in text and "不定期送" not in text:
+                                    paragraphs.append(text)
+                    elif "udn.com" in url:
+                        content_div = soup.find(id="article_body") or soup.find("section", id="article_body") or soup.find("section", class_="article-content__editor")
+                        if content_div:
+                            for p in content_div.find_all("p"):
+                                text = p.get_text().strip()
+                                if text and not p.get("class") and "圖／" not in text and "記者" not in text[:5]:
+                                    paragraphs.append(text)
+                                elif text and "記者" in text[:5] and len(text) > 20:
+                                    paragraphs.append(text)
+                    elif "ctee.com.tw" in url:
+                        content_div = soup.find("div", class_=re.compile(r"main-content|entry-content|article-content", re.I)) or soup.find("article")
+                        if content_div:
+                            for p in content_div.find_all("p"):
+                                text = p.get_text().strip()
+                                if len(text) > 15 and not any(kw in text for kw in ["延伸閱讀", "看更多"]):
+                                    paragraphs.append(text)
+                    elif "cna.com.tw" in url:
+                        content_div = soup.find("div", class_="paragraph") or soup.find("div", class_="centralContent")
+                        if content_div:
+                            for p in content_div.find_all("p"):
+                                text = p.get_text().strip()
+                                if len(text) > 15:
+                                    paragraphs.append(text)
+                    elif "chinatimes.com" in url:
+                        content_div = soup.find("div", class_="article-body") or soup.find("article")
+                        if content_div:
+                            for p in content_div.find_all("p"):
+                                text = p.get_text().strip()
+                                if len(text) > 15:
+                                    paragraphs.append(text)
+                    elif "cmoney.tw" in url:
+                        content_div = soup.find("div", class_=re.compile(r"articleContent|article-content|content|articleBody", re.I)) or soup.find("article")
+                        if content_div:
+                            for p in content_div.find_all(["p", "div"]):
+                                text = p.get_text().strip()
+                                if len(text) > 15 and not any(kw in text for kw in ["登入", "註冊", "股市爆料同學會", "下載APP", "立即追蹤"]):
+                                    if text not in paragraphs:
+                                        paragraphs.append(text)
+                    elif "yahoo.com" in url:
+                        content_div = soup.find("div", class_="caas-body") or soup.find("article")
+                        if content_div:
+                            for p in content_div.find_all("p"):
+                                text = p.get_text().strip()
+                                if len(text) > 10 and not any(kw in text for kw in ["延伸閱讀", "看更多", "Yahoo奇摩股市"]):
+                                    paragraphs.append(text)
 
-        if not paragraphs:
-            article = soup.find("article")
-            target = article if article else soup.body
-            if target:
-                for p in target.find_all(["p", "div"]):
-                    text = p.get_text().strip()
-                    if len(text) > 25 and not any(kw in text for kw in ["登入", "註冊", "隱私權", "版權所有", "客服", "cookies", "廣告", "function()"]):
-                        if text not in paragraphs:
-                            paragraphs.append(text)
-                        
+                if not paragraphs:
+                    article = soup.find("article")
+                    target = article if article else soup.body
+                    if target:
+                        for p in target.find_all(["p", "div"]):
+                            text = p.get_text().strip()
+                            if len(text) > 25 and not any(kw in text for kw in ["登入", "註冊", "隱私權", "版權所有", "客服", "cookies", "廣告", "function()"]):
+                                if text not in paragraphs:
+                                    paragraphs.append(text)
+        except Exception as fetch_err:
+            print(f"[api_news_content] 請求 {url} 異常: {fetch_err}")
+
+        # 5. 若成功解析出段落，儲存快取並回傳
         if paragraphs:
+            if news_id:
+                CNYES_ARTICLE_CACHE[str(news_id)] = paragraphs
+            CNYES_ARTICLE_CACHE[url] = paragraphs
             return jsonify({"success": True, "paragraphs": paragraphs})
-        else:
-            return jsonify({"success": False, "error": "Could not extract article content."})
+
+        # 6. 若皆未擷取到，但快取中有備用摘要段落，優雅降級回傳摘要而非直接跳錯
+        if news_id and str(news_id) in CNYES_ARTICLE_CACHE:
+            fallback_paras = CNYES_ARTICLE_CACHE[str(news_id)]
+            if fallback_paras:
+                return jsonify({"success": True, "paragraphs": fallback_paras, "fallback": True})
+
+        return jsonify({"success": False, "error": "暫無法由該新聞來源提取全文，請點擊下方按鈕前往原始網站閱讀。"})
             
     except Exception as e:
         traceback.print_exc()
@@ -4216,7 +4326,9 @@ def api_get_ticker_news(symbol):
                 'title': item['title'],
                 'publisher': item['publisher'],
                 'link': item['link'],
-                'publish_time': item['time']
+                'publish_time': item['time'],
+                'cover_img': item.get('cover_img', ''),
+                'paragraphs': item.get('paragraphs', [])
             })
         return jsonify({'news': news_list})
     except Exception as e:
